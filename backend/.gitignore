@@ -12,3 +12,4 @@ KMS
 .ruff_cache
 orders.json
 wellness_log.json
+shared-data/
