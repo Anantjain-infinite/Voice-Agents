@@ -1,10 +1,10 @@
 import logging
 import json
-from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any
+import os
+from datetime import datetime
+from typing import Optional, Dict, Any
 
 from dotenv import load_dotenv
-
 from livekit.agents import (
     Agent,
     AgentSession,
@@ -22,313 +22,453 @@ from livekit.agents import (
 from livekit.plugins import murf, silero, google, deepgram, noise_cancellation
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
-logger = logging.getLogger("teach-the-tutor")
-logger.setLevel(logging.INFO)
+logger = logging.getLogger("agent")
 
 load_dotenv(".env.local")
 
-COURSE_CONTENT_PATH = "shared-data/day4_tutor_content.json"
 
-
-def load_course_content() -> List[Dict[str, Any]]:
-    """Load the tutor content JSON. If missing, fall back to default."""
-    default_content = [
-        {
-            "id": "variables",
-            "title": "Variables",
-            "summary": "Variables store values so you can reuse them later. In most languages, a variable has a name and holds a value in memory. You can read or update this value throughout your program.",
-            "sample_question": "What is a variable and why is it useful?"
-        },
-        {
-            "id": "loops",
-            "title": "Loops",
-            "summary": "Loops let you repeat an action multiple times without writing the same code again. They usually run while a condition is true or over a sequence of items.",
-            "sample_question": "Explain the difference between a for loop and a while loop."
+# Lead data storage
+class LeadData:
+    def __init__(self):
+        self.name: Optional[str] = None
+        self.company: Optional[str] = None
+        self.email: Optional[str] = None
+        self.role: Optional[str] = None
+        self.use_case: Optional[str] = None
+        self.team_size: Optional[str] = None
+        self.timeline: Optional[str] = None
+        self.conversation_summary: list = []
+    
+    def to_dict(self):
+        return {
+            "name": self.name,
+            "company": self.company,
+            "email": self.email,
+            "role": self.role,
+            "use_case": self.use_case,
+            "team_size": self.team_size,
+            "timeline": self.timeline,
+            "conversation_summary": self.conversation_summary,
+            "timestamp": datetime.now().isoformat()
         }
-    ]
+    
+    def save_to_file(self):
+        os.makedirs("leads", exist_ok=True)
+        filename = f"leads/lead_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        with open(filename, 'w') as f:
+            json.dump(self.to_dict(), f, indent=2)
+        logger.info(f"Lead data saved to {filename}")
+        return filename
 
+
+class FAQSearchEngine:
+    """Preprocessed FAQ search engine with optimized keyword matching"""
+    
+    def __init__(self, faq_data: Dict[str, Any]):
+        self.faq_data = faq_data
+        self.search_index = self._build_search_index()
+        logger.info("FAQ search engine initialized with preprocessed data")
+    
+    def _build_search_index(self) -> Dict[str, str]:
+        """Build a keyword-to-response mapping for fast lookups"""
+        index = {}
+        
+        # Pricing responses
+        pricing_response = self._build_pricing_response()
+        for keyword in ["price", "pricing", "cost", "fee", "expensive", "cheap", "free", "how much"]:
+            index[keyword] = pricing_response
+        
+        # Product overview
+        product_response = self._build_product_response()
+        for keyword in ["what", "product", "do", "offer", "feature", "capability"]:
+            index[keyword] = product_response
+        
+        # Target audience
+        audience_response = self._build_audience_response()
+        for keyword in ["who", "for", "audience", "customer", "user", "suitable"]:
+            index[keyword] = audience_response
+        
+        # Free tier
+        free_response = self.faq_data["common_questions"]["free_tier"]
+        for keyword in ["free", "trial", "no cost"]:
+            index[keyword] = free_response
+        
+        # Integration
+        integration_response = self.faq_data["common_questions"]["integration"]
+        for keyword in ["integrate", "integration", "connect", "api", "third party"]:
+            index[keyword] = integration_response
+        
+        # Support
+        support_response = self.faq_data["common_questions"]["support"]
+        for keyword in ["support", "help", "customer service", "assistance"]:
+            index[keyword] = support_response
+        
+        # Security
+        security_response = self.faq_data["common_questions"]["data_security"]
+        for keyword in ["security", "secure", "safe", "privacy", "gdpr", "compliance"]:
+            index[keyword] = security_response
+        
+        # Migration
+        migration_response = self.faq_data["common_questions"]["migration"]
+        for keyword in ["migration", "migrate", "import", "transfer", "switch"]:
+            index[keyword] = migration_response
+        
+        # Customization
+        customization_response = self.faq_data["common_questions"]["customization"]
+        for keyword in ["customize", "customization", "custom", "personalize"]:
+            index[keyword] = customization_response
+        
+        # Scalability
+        scalability_response = self.faq_data["common_questions"]["scalability"]
+        for keyword in ["scale", "scalability", "grow", "growth", "expand"]:
+            index[keyword] = scalability_response
+        
+        return index
+    
+    def _build_pricing_response(self) -> str:
+        """Build comprehensive pricing response from FAQ data"""
+        products = self.faq_data["products"]
+        response = "Here's our pricing information:\n\n"
+        
+        # CRM pricing
+        crm = products["zoho_crm"]["pricing"]
+        response += f"Zoho CRM: Free for up to 3 users, paid plans from ${crm['standard']['price']} per user per month\n"
+        
+        # Zoho One pricing
+        one = products["zoho_one"]["pricing"]
+        response += f"Zoho One (all 45+ apps): ${one['all_employee']['price']} per employee per month (minimum 5 employees)\n"
+        
+        # Mail pricing
+        mail = products["zoho_mail"]["pricing"]
+        response += f"Zoho Mail: Free for 5 users, paid plans from ${mail['mail_lite']['price']} per user per month\n"
+        
+        # Books pricing
+        books = products["zoho_books"]["pricing"]
+        response += f"Zoho Books: Free up to $50K revenue, then ${books['standard']['price']} per month\n\n"
+        
+        response += "Many products have generous free tiers to get started!"
+        return response
+    
+    def _build_product_response(self) -> str:
+        """Build product overview response from FAQ data"""
+        products = self.faq_data["products"]
+        response = "Zoho offers a comprehensive suite of business applications including:\n\n"
+        
+        response += f"Zoho CRM: {products['zoho_crm']['description']}\n\n"
+        response += f"Zoho One: {products['zoho_one']['description']}\n\n"
+        response += f"Zoho Mail: {products['zoho_mail']['description']}\n\n"
+        response += f"Zoho Books: {products['zoho_books']['description']}\n\n"
+        response += f"Zoho Projects: {products['zoho_projects']['description']}\n\n"
+        response += "And many more apps for marketing, HR, analytics, and collaboration!"
+        
+        return response
+    
+    def _build_audience_response(self) -> str:
+        """Build target audience response from FAQ data"""
+        company = self.faq_data["company"]
+        return (
+            f"{company['target_audience']}. Whether you're a solo entrepreneur or "
+            "a growing team, we have solutions that scale with you."
+        )
+    
+    def search(self, query: str) -> str:
+        """Search the FAQ using preprocessed index"""
+        query_lower = query.lower()
+        
+        # Find matching keywords
+        for keyword, response in self.search_index.items():
+            if keyword in query_lower:
+                logger.info(f"FAQ match found for keyword: {keyword}")
+                return response
+        
+        # Default response if no match
+        logger.info("Using default FAQ response")
+        return (
+            f"{self.faq_data['company']['description']} "
+            f"We offer both individual apps and Zoho One, which includes access to all 45+ applications. "
+            f"{self.faq_data['common_questions']['free_tier']}"
+        )
+
+
+def load_faq_data() -> Dict[str, Any]:
+    """Load FAQ data from JSON file"""
+    faq_file = "zoho_faq.json"
+    
     try:
-        with open(COURSE_CONTENT_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if isinstance(data, list) and data:
-                logger.info(f"Loaded course content from {COURSE_CONTENT_PATH}")
-                return data
-            else:
-                logger.warning("Course content JSON was empty or invalid, using default.")
-                return default_content
+        with open(faq_file, 'r') as f:
+            faq_data = json.load(f)
+            logger.info(f"Successfully loaded FAQ data from {faq_file}")
+            return faq_data
     except FileNotFoundError:
-        logger.warning(f"{COURSE_CONTENT_PATH} not found, using default content.")
-        return default_content
-    except Exception as e:
-        logger.error(f"Error loading course content: {e}")
-        return default_content
+        logger.error(f"FAQ file {faq_file} not found. Using fallback FAQ data.")
+        # Fallback FAQ data if file doesn't exist
+        return {
+            "company": {
+                "name": "Zoho",
+                "description": "Zoho is a comprehensive suite of business software applications.",
+                "target_audience": "Small to medium-sized businesses and enterprises"
+            },
+            "products": {
+                "zoho_crm": {
+                    "name": "Zoho CRM",
+                    "description": "Customer relationship management software",
+                    "pricing": {
+                        "free": {"price": "$0", "users": "Up to 3 users"},
+                        "standard": {"price": "$14 per user per month"}
+                    }
+                },
+                "zoho_one": {
+                    "name": "Zoho One",
+                    "description": "Complete suite of 45+ integrated applications",
+                    "pricing": {
+                        "all_employee": {"price": "$37 per employee per month"}
+                    }
+                },
+                "zoho_mail": {
+                    "name": "Zoho Mail",
+                    "description": "Ad-free business email",
+                    "pricing": {
+                        "free": {"price": "$0", "users": "Up to 5 users"},
+                        "mail_lite": {"price": "$1 per user per month"}
+                    }
+                },
+                "zoho_books": {
+                    "name": "Zoho Books",
+                    "description": "Online accounting software",
+                    "pricing": {
+                        "free": {"price": "$0", "limit": "Up to $50K revenue"},
+                        "standard": {"price": "$15 per organization per month"}
+                    }
+                },
+                "zoho_projects": {
+                    "name": "Zoho Projects",
+                    "description": "Project management software",
+                    "pricing": {
+                        "free": {"price": "$0", "users": "Up to 3 users"}
+                    }
+                }
+            },
+            "common_questions": {
+                "free_tier": "Yes! Zoho offers generous free tiers for many products.",
+                "integration": "Zoho integrates with Google Workspace, Microsoft 365, and many more.",
+                "support": "24/7 support available through email, phone, and chat.",
+                "data_security": "Enterprise-grade security with SOC 2, ISO 27001, GDPR compliance.",
+                "migration": "Free migration assistance available from other platforms.",
+                "customization": "Highly customizable with no-code tools.",
+                "scalability": "Scales from solo entrepreneur to enterprise."
+            }
+        }
 
 
-@dataclass
-class UserData:
-    """Shared data across the whole Teach-the-Tutor session."""
-    personas: dict[str, Agent] = field(default_factory=dict)
-    prev_agent: Optional[Agent] = None
-    current_mode: str = "learn"  # "learn", "quiz", "teach_back"
-    current_concept_id: str = "variables"
-    course_content: List[Dict[str, Any]] = field(default_factory=load_course_content)
-
-    def get_concept(self, concept_id: Optional[str] = None) -> Dict[str, Any]:
-        if concept_id is None:
-            concept_id = self.current_concept_id
-
-        for c in self.course_content:
-            if c.get("id") == concept_id:
-                return c
-
-        # fallback to first concept
-        return self.course_content[0]
-
-    def summarize(self) -> str:
-        titles = ", ".join(
-            f"{c.get('id')} ({c.get('title')})" for c in self.course_content
-        )
-        return (
-            "You are part of a Teach-the-Tutor active recall coach. "
-            f"Available concepts: {titles}. "
-            f"Current mode: {self.current_mode}. "
-            f"Current concept id: {self.current_concept_id}."
-        )
-
-
-RunContext_T = RunContext[UserData]
-
-
-class BaseTutorAgent(Agent):
-    """Base agent that handles context sharing + mode switching."""
-
-    async def on_enter(self) -> None:
-        agent_name = self.__class__.__name__
-        logger.info(f"Entering {agent_name}")
-
-        userdata: UserData = self.session.userdata
-
-        # Copy the chat context for this agent
-        chat_ctx = self.chat_ctx.copy()
-
-        # Preserve reasonable amount of history from the previous agent
-        if userdata.prev_agent:
-            items_copy = self._truncate_chat_ctx(
-                userdata.prev_agent.chat_ctx.items, keep_function_call=True
-            )
-            existing_ids = {item.id for item in chat_ctx.items}
-            items_copy = [item for item in items_copy if item.id not in existing_ids]
-            chat_ctx.items.extend(items_copy)
-
-        # System message describing the multi-agent + mode setup
-        chat_ctx.add_message(
-            role="system",
-            content=(
-                f"You are the {agent_name} in a three-mode Teach-the-Tutor system.\n"
-                f"{userdata.summarize()}\n\n"
-                "COURSE CONTENT (JSON):\n"
-                f"{json.dumps(userdata.course_content)}\n\n"
-                "Rules:\n"
-                "- Always stay focused on the currently selected concept.\n"
-                "- In learn mode: explain the concept using its 'summary', give simple examples, then ask a quick check question.\n"
-                "- In quiz mode: ask short, targeted questions, primarily based on 'sample_question' and small variations. Wait for the user's answer.\n"
-                "- In teach_back mode: ask the user to explain the concept back in their own words, then give brief qualitative feedback comparing their answer to the 'summary'.\n"
-                "- The user can say things like 'switch to quiz mode', 'I want to teach it back', or 'go to learn mode'. When they do, call the appropriate mode-switch function tool.\n"
-                "- If the user mentions another concept id (like 'variables' or 'loops'), update the current concept and then continue in the current mode.\n"
-                "- Keep responses short, conversational, and clear, without formatting symbols or emojis."
-            ),
-        )
-
-        await self.update_chat_ctx(chat_ctx)
-        self.session.generate_reply()
-
-    def _truncate_chat_ctx(
-        self,
-        items: list,
-        keep_last_n_messages: int = 6,
-        keep_system_message: bool = False,
-        keep_function_call: bool = False,
-    ) -> list:
-        """Truncate the chat context to keep the last n messages."""
-        def _valid_item(item) -> bool:
-            if not keep_system_message and item.type == "message" and item.role == "system":
-                return False
-            if not keep_function_call and item.type in ["function_call", "function_call_output"]:
-                return False
-            return True
-
-        new_items = []
-        for item in reversed(items):
-            if _valid_item(item):
-                new_items.append(item)
-            if len(new_items) >= keep_last_n_messages:
-                break
-        new_items = new_items[::-1]
-
-        while new_items and new_items[0].type in ["function_call", "function_call_output"]:
-            new_items.pop(0)
-
-        return new_items
-
-    async def _transfer_to_agent(self, name: str, context: RunContext_T) -> Agent:
-        """Transfer to another mode-agent while preserving context."""
-        userdata = context.userdata
-        current_agent = context.session.current_agent
-        next_agent = userdata.personas[name]
-
-        userdata.prev_agent = current_agent
-        userdata.current_mode = name
-
-        return next_agent
-
-    # ========= Shared function tools across all modes =========
-
-    @function_tool
-    async def switch_to_learn_mode(self, context: RunContext_T) -> Agent:
-        """Switch to Learn mode (Matthew voice) for concept explanations."""
-        await self.session.say("Switching to learn mode so I can explain the concept step by step.")
-        return await self._transfer_to_agent("learn", context)
-
-    @function_tool
-    async def switch_to_quiz_mode(self, context: RunContext_T) -> Agent:
-        """Switch to Quiz mode (Alicia voice) for active recall questions."""
-        await self.session.say("Switching to quiz mode so I can ask you questions.")
-        return await self._transfer_to_agent("quiz", context)
-
-    @function_tool
-    async def switch_to_teach_back_mode(self, context: RunContext_T) -> Agent:
-        """Switch to Teach-back mode (Ken voice) to have the user explain the concept."""
-        await self.session.say("Switching to teach-back mode so you can explain the concept to me.")
-        return await self._transfer_to_agent("teach_back", context)
-
-    @function_tool
-    async def set_concept(self, context: RunContext_T, concept_id: str) -> str:
-        """Set the current concept by its id (e.g., 'variables', 'loops')."""
-        userdata = context.userdata
-        concepts = [c.get("id") for c in userdata.course_content]
-        if concept_id not in concepts:
-            return (
-                f"I couldn't find the concept '{concept_id}'. "
-                f"Available concepts are: {', '.join(concepts)}."
-            )
-
-        userdata.current_concept_id = concept_id
-        concept = userdata.get_concept(concept_id)
-        return (
-            f"Got it! We'll focus on {concept.get('title')} now. "
-            f"You can keep using the current mode, or ask to switch modes at any time."
-        )
-
-
-# ======================= Mode Agents =======================
-
-class LearnAgent(BaseTutorAgent):
-    def __init__(self) -> None:
+class ZohoSDRAssistant(Agent):
+    def __init__(self, lead_data: LeadData, faq_engine: FAQSearchEngine) -> None:
+        self.lead_data = lead_data
+        self.faq_engine = faq_engine
+        
         super().__init__(
-            instructions=(
-                "You are the Learn-mode tutor. Your job is to clearly explain the current concept, "
-                "using the summary from the course content, with gentle step-by-step language and simple examples. "
-                "After explaining, ask the learner one short check question based on the concept."
-            ),
-            stt=deepgram.STT(model="nova-3"),
-            llm=google.LLM(model="gemini-2.5-flash"),
-            tts=murf.TTS(
-                voice="en-US-matthew",  # Murf Falcon Voice - Matthew
-                style="Conversation",
-            ),
-            vad=silero.VAD.load(),
+            instructions="""You are Emma, a friendly and professional Sales Development Representative for Zoho.
+
+**Your Role:**
+- Warmly greet visitors and understand their business needs
+- Answer questions about Zoho's products, pricing, and features using the FAQ information
+- Naturally collect lead information during the conversation
+- Maintain a conversational, helpful tone without being pushy
+
+**Conversation Flow:**
+1. Start with a warm greeting and ask what brought them to Zoho today
+2. Listen to their needs and ask about their current challenges
+3. Answer their questions about Zoho products using the FAQ
+4. Naturally collect information: name, company, role, use case, team size, timeline
+5. When they indicate they're done (say thanks, goodbye, that's all), provide a brief summary
+
+**Important Guidelines:**
+- Keep responses concise and natural (you're speaking, not writing)
+- Don't use complex formatting, emojis, or asterisks in your speech
+- Ask for information naturally, not like a form - weave it into conversation
+- If you don't know something from the FAQ, be honest and offer to connect them with a specialist
+- Focus on understanding their needs before pitching solutions
+- Use the search_faq tool when users ask about products, pricing, or features
+- Use the update_lead_field tool to store information as you learn it
+- When the conversation ends, use the end_conversation tool to save everything
+
+**Lead Information to Collect (naturally during conversation):**
+- Name
+- Company name
+- Email address
+- Role/title
+- What they want to use Zoho for (use case)
+- Team size
+- Timeline (are they looking to start now, soon, or just exploring)
+
+Remember: You're having a natural conversation, not conducting an interrogation. Be curious, helpful, and friendly!""",
         )
+    
+    @function_tool
+    async def search_faq(self, context: RunContext, question: str):
+        """Search the Zoho FAQ database for information about products, pricing, and features.
+        
+        Use this tool when the user asks about:
+        - What Zoho products are available
+        - Pricing information
+        - Product features
+        - Who Zoho is for
+        - Free tiers or trials
+        - Integrations
+        - Security and compliance
+        - Customization options
+        - Migration assistance
+        - Scalability
+        
+        Args:
+            question: The user's question about Zoho products or services
+        """
+        logger.info(f"Searching FAQ for: {question}")
+        answer = self.faq_engine.search(question)
+        self.lead_data.conversation_summary.append(f"User asked: {question}")
+        return answer
+    
+    @function_tool
+    async def update_lead_field(
+        self, 
+        context: RunContext, 
+        field: str, 
+        value: str
+    ):
+        """Update a specific field in the lead data as you learn information during the conversation.
+        
+        Use this tool whenever the user shares information about themselves. Store it immediately.
+        
+        Args:
+            field: The field to update. Must be one of: name, company, email, role, use_case, team_size, timeline
+            value: The value to store for this field
+        """
+        valid_fields = ["name", "company", "email", "role", "use_case", "team_size", "timeline"]
+        
+        if field not in valid_fields:
+            return f"Invalid field. Must be one of: {', '.join(valid_fields)}"
+        
+        setattr(self.lead_data, field, value)
+        logger.info(f"Updated lead field {field}: {value}")
+        
+        return f"Got it! I've noted that your {field.replace('_', ' ')} is {value}."
+    
+    @function_tool
+    async def end_conversation(self, context: RunContext):
+        """End the conversation and save the lead data. Use this when the user indicates they're done.
+        
+        Signs the conversation is ending:
+        - User says "thanks", "that's all", "goodbye", "I'm done"
+        - User has no more questions
+        - Natural end of conversation
+        """
+        logger.info("Ending conversation and saving lead data")
+        
+        # Save lead data to file
+        filename = self.lead_data.save_to_file()
+        
+        # Create summary
+        summary_parts = []
+        if self.lead_data.name:
+            summary_parts.append(f"{self.lead_data.name}")
+        if self.lead_data.company:
+            summary_parts.append(f"from {self.lead_data.company}")
+        if self.lead_data.role:
+            summary_parts.append(f"who is a {self.lead_data.role}")
+        
+        summary = " ".join(summary_parts) if summary_parts else "A potential customer"
+        
+        use_case_info = f" They're interested in using Zoho for {self.lead_data.use_case}." if self.lead_data.use_case else ""
+        team_info = f" They have a team of {self.lead_data.team_size}." if self.lead_data.team_size else ""
+        timeline_info = f" Their timeline is {self.lead_data.timeline}." if self.lead_data.timeline else ""
+        
+        full_summary = f"{summary}.{use_case_info}{team_info}{timeline_info}"
+        
+        return f"""Thank you so much for your time today! Let me quickly recap:
+
+{full_summary}
+
+I've saved all your information, and someone from our team will reach out to you soon to help you get started with Zoho. Have a wonderful day!
+
+[Lead data saved to {filename}]"""
 
 
-class QuizAgent(BaseTutorAgent):
-    def __init__(self) -> None:
-        super().__init__(
-            instructions=(
-                "You are the Quiz-mode tutor. Your job is to ask active recall questions about the current concept. "
-                "Base your questions on the 'sample_question' and small variations. "
-                "Ask one question at a time and wait for the learner's answer. Do not immediately explain the full concept."
-            ),
-            stt=deepgram.STT(model="nova-3"),
-            llm=google.LLM(model="gemini-2.5-flash"),
-            tts=murf.TTS(
-                voice="en-US-alicia",  # Murf Falcon Voice - Alicia
-                style="Conversation",
-            ),
-            vad=silero.VAD.load(),
-        )
+def prewarm(proc: JobProcess):
+    """Prewarm function to load models and preprocess data before handling jobs"""
+    logger.info("Starting prewarm process...")
+    
+    # Load VAD model
+    logger.info("Loading VAD model...")
+    proc.userdata["vad"] = silero.VAD.load()
+    logger.info("VAD model loaded successfully")
+    
+    # Load and preprocess FAQ data
+    logger.info("Loading FAQ data from zoho_faq.json...")
+    faq_data = load_faq_data()
+    
+    # Initialize FAQ search engine with preprocessed data
+    logger.info("Building FAQ search index...")
+    faq_engine = FAQSearchEngine(faq_data)
+    proc.userdata["faq_engine"] = faq_engine
+    logger.info("FAQ search engine ready")
+    
+    logger.info("Prewarming complete - VAD and FAQ ready!")
 
-
-class TeachBackAgent(BaseTutorAgent):
-    def __init__(self) -> None:
-        super().__init__(
-            instructions=(
-                "You are the Teach-back-mode tutor. Your job is to ask the learner to explain the current concept "
-                "in their own words. Listen to their explanation, compare it to the summary from the course content, "
-                "and then provide brief qualitative feedback: what they got right, what was missing, and a quick correction."
-            ),
-            stt=deepgram.STT(model="nova-3"),
-            llm=google.LLM(model="gemini-2.5-flash"),
-            tts=murf.TTS(
-                voice="en-US-ken",  # Murf Falcon Voice - Ken
-                style="Conversation",
-            ),
-            vad=silero.VAD.load(),
-        )
-
-
-# ======================= Entrypoint =======================
 
 async def entrypoint(ctx: JobContext):
-    """
-    Entry for the Day 4 Teach-the-Tutor system.
-
-    Flow:
-    - Start in Learn mode (Matthew), greet the user, and ask which mode they want.
-    - The user can say 'learn', 'quiz', or 'teach back', and the LLM will call the
-      appropriate switch_* tool to hand off to the right agent.
-    - Mode switching keeps conversation context using the shared UserData + chat history.
-    """
-
-    userdata = UserData()
-
-    learn_agent = LearnAgent()
-    quiz_agent = QuizAgent()
-    teach_back_agent = TeachBackAgent()
-
-    userdata.personas.update(
-        {
-            "learn": learn_agent,
-            "quiz": quiz_agent,
-            "teach_back": teach_back_agent,
-        }
+    # Logging setup
+    ctx.log_context_fields = {
+        "room": ctx.room.name,
+    }
+    
+    # Initialize lead data for this conversation
+    lead_data = LeadData()
+    
+    # Get preprocessed FAQ engine from prewarm
+    faq_engine = ctx.proc.userdata["faq_engine"]
+    logger.info("Using prewarmed FAQ search engine")
+    
+    # Set up voice AI pipeline
+    session = AgentSession(
+        stt=deepgram.STT(model="nova-3"),
+        llm=google.LLM(model="gemini-2.5-flash"),
+        tts=murf.TTS(
+            voice="en-US-matthew", 
+            style="Conversation",
+            tokenizer=tokenize.basic.SentenceTokenizer(min_sentence_len=2),
+            text_pacing=True
+        ),
+        turn_detection=MultilingualModel(),
+        vad=ctx.proc.userdata["vad"],
+        preemptive_generation=True,
     )
-
-    session = AgentSession[UserData](userdata=userdata)
-
-    # Start in Learn mode, but the very first thing LearnAgent should do is:
-    # - greet the user
-    # - explain the three modes (learn, quiz, teach_back)
-    # - ask which one they prefer
-
-
+    
     # Metrics collection
-    usage_collector = metrics.UsageCollector() 
-    @session.on("metrics_collected") 
-    def _on_metrics_collected(ev: MetricsCollectedEvent): 
-        metrics.log_metrics(ev.metrics) 
-        usage_collector.collect(ev.metrics) 
-    async def log_usage(): 
-        summary = usage_collector.get_summary() 
-        logger.info(f"Usage: {summary}") 
+    usage_collector = metrics.UsageCollector()
+    
+    @session.on("metrics_collected")
+    def _on_metrics_collected(ev: MetricsCollectedEvent):
+        metrics.log_metrics(ev.metrics)
+        usage_collector.collect(ev.metrics)
+    
+    async def log_usage():
+        summary = usage_collector.get_summary()
+        logger.info(f"Usage: {summary}")
+        logger.info(f"Final lead data: {lead_data.to_dict()}")
+    
     ctx.add_shutdown_callback(log_usage)
-
+    
+    # Start the session with our SDR agent
     await session.start(
-        agent=learn_agent,
+        agent=ZohoSDRAssistant(lead_data, faq_engine),
         room=ctx.room,
+        room_input_options=RoomInputOptions(
+            noise_cancellation=noise_cancellation.BVC(),
+        ),
     )
-
+    
+    # Join the room and connect to the user
     await ctx.connect()
 
 
 if __name__ == "__main__":
-    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint))
+    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, prewarm_fnc=prewarm))
