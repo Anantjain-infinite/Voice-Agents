@@ -16,3 +16,5 @@ shared-data/
 zoho_faq.json
 leads/
 fraud_cases.db
+orders/
+catalog.json
