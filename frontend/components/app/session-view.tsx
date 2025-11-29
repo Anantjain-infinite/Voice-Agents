@@ -6,10 +6,12 @@ import type { AppConfig } from '@/app-config';
 import { ChatTranscript } from '@/components/app/chat-transcript';
 import { PreConnectMessage } from '@/components/app/preconnect-message';
 import { TileLayout } from '@/components/app/tile-layout';
+import { useSession } from '@/components/app/session-provider';
 import {
   AgentControlBar,
   type ControlBarControls,
 } from '@/components/livekit/agent-control-bar/agent-control-bar';
+import { Button } from '@/components/livekit/button';
 import { useChatMessages } from '@/hooks/useChatMessages';
 import { useConnectionTimeout } from '@/hooks/useConnectionTimout';
 import { useDebugMode } from '@/hooks/useDebug';
@@ -72,6 +74,7 @@ export const SessionView = ({
   const messages = useChatMessages();
   const [chatOpen, setChatOpen] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const { endSession, startSession } = useSession();
 
   const controls: ControlBarControls = {
     leave: true,
@@ -89,6 +92,15 @@ export const SessionView = ({
       scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
     }
   }, [messages]);
+
+  // Restart the adventure - disconnect and reconnect
+  const handleRestartAdventure = async () => {
+    await endSession();
+    // Small delay to ensure clean disconnect
+    setTimeout(() => {
+      startSession();
+    }, 500);
+  };
 
   return (
     <section className="bg-background relative z-10 h-full w-full overflow-hidden" {...props}>
@@ -122,6 +134,25 @@ export const SessionView = ({
         )}
         <div className="bg-background relative mx-auto max-w-2xl pb-3 md:pb-12">
           <Fade bottom className="absolute inset-x-0 top-0 h-4 -translate-y-full" />
+          
+          {/* D&D Game Master UI Enhancement */}
+          {messages.length > 0 && (
+            <div className="mb-3 flex items-center justify-center gap-4">
+              <div className="text-muted-foreground flex items-center gap-2 text-sm">
+                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-green-500"></span>
+                <span className="font-medium">Adventure in Progress</span>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRestartAdventure}
+                className="font-mono text-xs"
+              >
+                🎲 Restart Story
+              </Button>
+            </div>
+          )}
+          
           <AgentControlBar controls={controls} onChatOpenChange={setChatOpen} />
         </div>
       </MotionBottom>
